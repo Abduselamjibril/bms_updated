@@ -1,0 +1,47 @@
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  Index,
+} from 'typeorm';
+
+export enum UtilityType {
+  WATER = 'water',
+  ELECTRICITY = 'electricity',
+}
+
+@Entity('utility_meters')
+@Index('idx_meter_serial', ['serial_no'])
+@Index('idx_meter_type', ['type'])
+@Index('idx_meter_building', ['building_id'])
+@Index('idx_meter_site', ['site_id'])
+export class UtilityMeter {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Index()
+  @Column()
+  unit_id!: string;
+
+  @Column({ type: 'enum', enum: UtilityType })
+  type!: UtilityType;
+
+  @Column({ length: 200, nullable: true })
+  serial_no?: string;
+
+  @Column({ type: 'double precision', nullable: true })
+  initial_reading?: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  unit_price?: number;
+
+  @Column({ nullable: true })
+  building_id?: string;
+
+  @Column({ nullable: true })
+  site_id?: string;
+
+  @CreateDateColumn()
+  created_at!: Date;
+}

@@ -1,0 +1,170 @@
+import {
+  Injectable,
+  UnauthorizedException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, In } from 'typeorm';
+import { UserRole } from '../roles/entities/user-role.entity';
+import { RolePermission } from '../roles/entities/role-permission.entity';
+import { Permission } from '../roles/entities/permission.entity';
+import { UsersService } from '../users/users.service';
+import { LoginHistory } from '../users/entities/login-history.entity';
+import { LoginDto } from '../users/dto/login.dto';
+import { UserStatus } from '../users/entities/user.entity';
+import * as bcrypt from 'bcryptjs';
+import { ChangePasswordDto } from './dto/change-password.dto';
+
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    @InjectRepository(LoginHistory)
+    private readonly loginHistoryRepo: Repository<LoginHistory>,
+    @InjectRepository(UserRole)
+    private readonly userRoleRepo: Repository<UserRole>,
+    @InjectRepository(RolePermission)
+    private readonly rolePermissionRepo: Repository<RolePermission>,
+    @InjectRepository(Permission)
+    private readonly permissionRepo: Repository<Permission>,
+  ) { }
+
+  async validateUser(loginDto: LoginDto, ip: string) {
+    const user = await this.usersService.findByEmail(loginDto.email);
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+    // Check if account is temporarily locked
+    if (user.locked_until && user.locked_until > new Date()) {
+      const msRemaining = user.locked_until.getTime() - Date.now();
+      const minutesRemaining = Math.ceil(msRemaining / 60000);
+      throw new ForbiddenException(
+        `Account temporarily locked. Please try again in ${minutesRemaining} minute(s).`,
+      );
+    }
+
+    if (user.status === UserStatus.LOCKED)
+      throw new ForbiddenException('Account locked. Contact Super Admin');
+
+    const valid = await bcrypt.compare(loginDto.password, user.password_hash);
+    // Account locking logic
+    if (!valid) {
+      user.failed_login_attempts = (user.failed_login_attempts || 0) + 1;
+      if (user.failed_login_attempts >= 5) {
+        // Set temporary lock for 5 minutes
+        user.locked_until = new Date(Date.now() + 5 * 60 * 1000);
+        user.failed_login_attempts = 0; // Reset attempts to avoid immediate re-lock
+      }
+      await this.usersService.save(user);
+      await this.loginHistoryRepo.save({
+        user,
+        ip_address: ip,
+        success: false,
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    user.failed_login_attempts = 0;
+    user.locked_until = null;
+    await this.usersService.save(user);
+    await this.loginHistoryRepo.save({ user, ip_address: ip, success: true });
+    return user;
+  }
+
+  async login(user: any) {
+    // Load roles for this user
+    const userRoles = await this.userRoleRepo.find({
+      where: { user: { id: user.id } },
+      relations: ['role'],
+    });
+    const roleIds = userRoles.map((ur) => (ur.role as any).id);
+    const roleNames = userRoles.map((ur) => (ur.role as any).name);
+
+    // Load permissions assigned to these roles
+    let permissionCodes: string[] = [];
+    if (roleIds.length > 0) {
+      const rolePerms = await this.rolePermissionRepo.find({
+        where: { role: { id: In(roleIds) } } as any,
+        relations: ['permission'] as any,
+      });
+      permissionCodes = Array.from(
+        new Set(rolePerms.map((rp) => (rp.permission as any).code)),
+      );
+    }
+
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      roles: roleNames,
+      permissions: permissionCodes,
+    };
+    return {
+      access_token: this.jwtService.sign(payload),
+    };
+  }
+
+  async refreshToken(user: any) {
+    // same enrichment as login
+    const userRoles = await this.userRoleRepo.find({
+      where: { user: { id: user.id } },
+      relations: ['role'],
+    });
+    const roleIds = userRoles.map((ur) => (ur.role as any).id);
+    const roleNames = userRoles.map((ur) => (ur.role as any).name);
+    let permissionCodes: string[] = [];
+    if (roleIds.length > 0) {
+      const rolePerms = await this.rolePermissionRepo.find({
+        where: { role: { id: In(roleIds) } } as any,
+        relations: ['permission'] as any,
+      });
+      permissionCodes = Array.from(
+        new Set(rolePerms.map((rp) => (rp.permission as any).code)),
+      );
+    }
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      roles: roleNames,
+      permissions: permissionCodes,
+    };
+    return { access_token: this.jwtService.sign(payload) };
+  }
+
+  async getProfile(user: any) {
+    // Optionally populate permissions here
+    return user;
+  }
+
+  async getLoginHistory(user: any) {
+    return this.loginHistoryRepo.find({
+      where: { user: { id: user.id } },
+      order: { login_time: 'DESC' },
+      take: 20,
+    });
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.usersService.findById(userId);
+
+    // Verify current password
+    const isMatch = await bcrypt.compare(dto.currentPassword, user.password_hash);
+    if (!isMatch) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    // Dynamic password length check based on user role
+    const userRoles = user.userRoles || [];
+    const isTenant = userRoles.some((ur: any) => ur.role?.name === 'tenant');
+    if (!isTenant && dto.newPassword.length < 8) {
+      throw new BadRequestException('Passwords for Administrator/Staff roles must be at least 8 characters long');
+    }
+
+    // Hash and save new password
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+    user.password_hash = hashedPassword;
+    await this.usersService.save(user);
+
+    return { message: 'Password changed successfully' };
+  }
+}

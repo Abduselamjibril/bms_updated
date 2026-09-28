@@ -1,0 +1,1550 @@
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import {
+  listTenants,
+  registerTenant,
+  listPendingApplications,
+  getTenant,
+  updateTenant,
+  createDocument,
+  listDocuments,
+  verifyDocument,
+  createAnnouncement,
+  listAnnouncements,
+  sendMessage,
+  getMessages,
+  createApplication,
+  createAndVerifyFromTenant,
+} from '../api/tenants'
+import * as financeApi from '../api/finance'
+import api from '../api/axios'
+
+import { listUnits } from '../api/units'
+import { listLeases } from '../api/leases'
+import { listBuildings } from '../api/buildings'
+import { listSites } from '../api/sites'
+import { useToast } from '../components/ToastProvider'
+import PageLayout from '../components/PageLayout'
+import StatusBadge from '../components/StatusBadge'
+import {
+  Plus,
+  Search,
+  Mail,
+  Phone,
+  MoreVertical,
+  MoreHorizontal,
+  Edit3,
+  Building2,
+  Info,
+  CreditCard,
+  MessageCircle,
+  FileText,
+  UserPlus,
+  MapPin,
+  Shield,
+  ArrowRight,
+  Calendar,
+  Briefcase,
+  Hash,
+  Clock,
+  Eye,
+  X,
+  Download
+} from 'lucide-react'
+import { downloadReport } from '../utils/export'
+import PermissionGate from '../components/PermissionGate'
+
+
+interface Tenant {
+  id: string | number;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  status?: string;
+  tin_number?: string;
+  vat_reg_number?: string;
+  created_at?: string;
+  tenant_type?: string;
+  profile_image?: string;
+  profile_image_verified?: boolean;
+  license_image_verified?: boolean;
+  id_image_verified?: boolean;
+  id_image?: string;
+  license_image?: string;
+  detailed_address?: string;
+  building_name?: string;
+  unit_number?: string;
+  lease?: any;
+  unit?: any;
+  building?: any;
+  user?: { id: string; name: string; email: string };
+}
+// documents removed from UI — document interface omitted
+interface Message {
+  id: number | string;
+  sender?: { id: string | number; name: string; email: string };
+  receiver?: { id: string | number; name: string; email: string };
+  content: string;
+  sent_at?: string;
+  read_status?: boolean;
+}
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || 'https://bms.skylinkict.com'
+
+export default function Tenants() {
+  const toast = useToast()
+  const [tenants, setTenants] = useState<Tenant[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const [showRegister, setShowRegister] = useState(false)
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [phone, setPhone] = useState('')
+  const [telegramUsername, setTelegramUsername] = useState('')
+
+  const [tenantType, setTenantType] = useState('personal')
+  const [idImage, setIdImage] = useState('')
+  const [detailedAddress, setDetailedAddress] = useState('')
+  const [licenseImage, setLicenseImage] = useState('')
+  const [tinNumber, setTinNumber] = useState('')
+  const [tinError, setTinError] = useState('')
+  const [tinCertImage, setTinCertImage] = useState('')
+  const [vatRegNumber, setVatRegNumber] = useState('')
+  const [profileImage, setProfileImage] = useState('')
+
+  const idImageRef = useRef<HTMLInputElement>(null)
+  const licenseImageRef = useRef<HTMLInputElement>(null)
+  const profileImageRef = useRef<HTMLInputElement>(null)
+  const tinCertImageRef = useRef<HTMLInputElement>(null)
+
+  const [detailTenant, setDetailTenant] = useState<Tenant | null>(null)
+  const [activeDetailTab, setActiveDetailTab] = useState<'info' | 'ledger' | 'messages' | 'documents'>('info')
+  const [ledger, setLedger] = useState<any[]>([])
+  const [ledgerLoading, setLedgerLoading] = useState(false)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [buildings, setBuildings] = useState<any[]>([])
+  const [sites, setSites] = useState<any[]>([])
+  const [selectedTenantId, setSelectedTenantId] = useState<string | number>('')
+  const [showFullModal, setShowFullModal] = useState(false)
+  const [showNoticeModal, setShowNoticeModal] = useState(false)
+  const [noticeContent, setNoticeContent] = useState('')
+  const [sendingNotice, setSendingNotice] = useState(false)
+  const [applications, setApplications] = useState<any[]>([])
+  const [units, setUnits] = useState<any[]>([])
+  const [docsList, setDocsList] = useState<any[]>([])
+  const [docFile, setDocFile] = useState<File | null>(null)
+  const [docType, setDocType] = useState('ID')
+  const [adminMessages, setAdminMessages] = useState<any[]>([])
+  const [adminAnnouncements, setAdminAnnouncements] = useState<any[]>([])
+  const [appBody, setAppBody] = useState('')
+  const [appUnitId, setAppUnitId] = useState('')
+  const [appBuildingId, setAppBuildingId] = useState<string | number>('')
+  const [appMoveInDate, setAppMoveInDate] = useState('')
+  // accordion state
+  const [openDocs, setOpenDocs] = useState(true)
+  const [openAnnouncements, setOpenAnnouncements] = useState(false)
+
+  // Edit tenant state
+  const [showEditTenant, setShowEditTenant] = useState(false)
+  const [editFirstName, setEditFirstName] = useState('')
+  const [editLastName, setEditLastName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editTinNumber, setEditTinNumber] = useState('')
+  const [editVatRegNumber, setEditVatRegNumber] = useState('')
+  const [editDetailedAddress, setEditDetailedAddress] = useState('')
+  const [editTenantStatus, setEditTenantStatus] = useState('active')
+  const [editIdImage, setEditIdImage] = useState('')
+  const [editLicenseImage, setEditLicenseImage] = useState('')
+  const [editTenantType, setEditTenantType] = useState('personal')
+  const [editProfileImage, setEditProfileImage] = useState('')
+  const [editTinCertImage, setEditTinCertImage] = useState('')
+  const [editingTenantId, setEditingTenantId] = useState<string | number>('')
+  const editIdImageRef = useRef<HTMLInputElement>(null)
+  const editLicenseImageRef = useRef<HTMLInputElement>(null)
+  const editProfileImageRef = useRef<HTMLInputElement>(null)
+  const editTinCertImageRef = useRef<HTMLInputElement>(null)
+  const [openMessages, setOpenMessages] = useState(false)
+  const [openApplications, setOpenApplications] = useState(false)
+  const [announceTitle, setAnnounceTitle] = useState('')
+  const [announceMessage, setAnnounceMessage] = useState('')
+  const [announceTarget, setAnnounceTarget] = useState('all')
+  const [announceBuildingId, setAnnounceBuildingId] = useState<string | number>('')
+  const [announceSiteId, setAnnounceSiteId] = useState<string | number>('')
+  const [msgSubject, setMsgSubject] = useState('')
+  const [msgBody, setMsgBody] = useState('')
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await listTenants({ page: 1, per_page: 200 })
+      const list = Array.isArray(res) ? res : (res?.data || res || [])
+      // Enrich tenants with their primary lease (if any) so building and status display dynamically
+      try {
+        const enriched = await Promise.all((list || []).map(async (t: any) => {
+          try {
+            const leases: any = await listLeases({ tenant_id: t.id, page: 1, per_page: 1 })
+            const first = Array.isArray(leases) ? leases[0] : (leases?.data || leases || [])[0]
+            if (first) {
+              return { ...t, lease: first, building: t.building || first.building, status: t.status || first.status }
+            }
+          } catch (err) {
+            // ignore per-tenant lease fetch errors
+          }
+          return t
+        }))
+        setTenants(enriched)
+      } catch (err) {
+        setTenants(list)
+      }
+      // load buildings and sites for selects
+      try { const bRes: any = await listBuildings({ page: 1, per_page: 200 }); const bList = Array.isArray(bRes) ? bRes : (bRes?.data || bRes || []); setBuildings(bList) } catch (e) { /* ignore */ }
+      try { const sRes: any = await listSites({ page: 1, per_page: 200 }); const sList = Array.isArray(sRes) ? sRes : (sRes?.data || sRes || []); setSites(sList) } catch (e) { /* ignore */ }
+    } catch (e: any) {
+      console.error(e)
+      toast.addToast('Failed to load tenants', 'error')
+    } finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    async function fetchMessages() {
+      if (detailTenant?.id && activeDetailTab === 'messages') {
+        try {
+          const res = await getMessages(detailTenant.id)
+          setMessages(Array.isArray(res) ? res : (res?.data || []))
+        } catch (e) {
+          console.error('Failed to load messages', e)
+          setMessages([])
+        }
+      }
+    }
+    fetchMessages()
+  }, [detailTenant?.id, activeDetailTab])  // Refresh tenant detail when leases change elsewhere in the app
+  useEffect(() => {
+    function onLeaseUpdated(e: any) {
+      try {
+        const tid = e?.detail?.tenantId
+        if (!tid) return
+        // refresh tenants list
+        try { load() } catch (err) { /* ignore */ }
+        if (detailTenant && String(detailTenant.id) === String(tid)) {
+          // reload the tenant detail to pick up latest lease/lease_value
+          openDetail(detailTenant.id)
+        }
+      } catch (err) { console.error('lease update handler', err) }
+    }
+    window.addEventListener('lease:updated', onLeaseUpdated as any)
+    return () => window.removeEventListener('lease:updated', onLeaseUpdated as any)
+  }, [detailTenant, load])
+
+  async function handleRegister(e: React.FormEvent) {
+    e.preventDefault()
+    // TIN validation: if provided, must be exactly 10 digits
+    if (tinNumber && !/^[0-9]{10}$/.test(tinNumber)) {
+      setTinError('TIN must be exactly 10 digits (e.g. 0000011037)')
+      toast.addToast('TIN number must be exactly 10 digits', 'error')
+      return
+    }
+    if (password.length < 6) {
+      toast.addToast('Password must be at least 6 characters long', 'error')
+      return
+    }
+    setTinError('')
+    try {
+      const payload: any = {
+        first_name: firstName,
+        last_name: lastName,
+        email,
+        password,
+        phone,
+        tenant_type: tenantType,
+      }
+      // Always attach optional documentation fields if provided
+      if (idImage) payload.id_image = idImage
+      if (licenseImage) payload.license_image = licenseImage
+      if (profileImage) payload.profile_image = profileImage
+      if (tinNumber) payload.tin_number = tinNumber
+      if (tinCertImage) payload.tin_certificate_image = tinCertImage
+      if (vatRegNumber) payload.vat_reg_number = vatRegNumber
+      if (detailedAddress) payload.detailed_address = detailedAddress
+      if (telegramUsername) payload.telegram_username = telegramUsername
+      await registerTenant(payload)
+      toast.addToast('Registered', 'success')
+      setShowRegister(false)
+      setFirstName(''); setLastName(''); setEmail(''); setPassword(''); setPhone(''); setTelegramUsername(''); setIdImage(''); setDetailedAddress(''); setLicenseImage(''); setTinNumber(''); setTinError(''); setTinCertImage(''); setVatRegNumber(''); setProfileImage(''); setTenantType('personal')
+      load()
+    } catch (err: any) {
+      console.error(err)
+      toast.addToast(err?.response?.data?.message || 'Register failed', 'error')
+    }
+  }
+
+  function openEditTenant(t: any) {
+    setEditingTenantId(t.id)
+    setEditFirstName(t.first_name || '')
+    setEditLastName(t.last_name || '')
+    setEditEmail(t.email || '')
+    setEditPhone(t.phone || '')
+    setEditTinNumber(t.tin_number || '')
+    setEditVatRegNumber(t.vat_reg_number || '')
+    setEditDetailedAddress(t.detailed_address || '')
+    setEditTenantStatus(t.status || 'active')
+    setEditIdImage(t.id_image || '')
+    setEditLicenseImage(t.license_image || '')
+    setEditTenantType(t.tenant_type || 'personal')
+    setEditProfileImage(t.profile_image || '')
+    setEditTinCertImage(t.tin_certificate_image || '')
+    setShowEditTenant(true)
+  }
+
+  async function handleEditTenant(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      const payload: any = {
+        first_name: editFirstName,
+        last_name: editLastName,
+        email: editEmail,
+        phone: editPhone,
+        tenant_type: editTenantType,
+      }
+      if (editTinNumber) payload.tin_number = editTinNumber
+      if (editVatRegNumber) payload.vat_reg_number = editVatRegNumber
+      if (editDetailedAddress) payload.detailed_address = editDetailedAddress
+      if (editTenantStatus) payload.status = editTenantStatus
+      if (editIdImage) payload.id_image = editIdImage
+      if (editLicenseImage) payload.license_image = editLicenseImage
+      if (editProfileImage) payload.profile_image = editProfileImage
+      if (editTinCertImage) payload.tin_certificate_image = editTinCertImage
+      await updateTenant(String(editingTenantId), payload)
+      toast.addToast('Tenant updated', 'success')
+      setShowEditTenant(false)
+      load()
+      if (detailTenant && String(detailTenant.id) === String(editingTenantId)) {
+        openDetail(editingTenantId)
+      }
+    } catch (err: any) {
+      toast.addToast(err?.response?.data?.message || 'Update failed', 'error')
+    }
+  }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>, setter: (s: string) => void) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const fd = new FormData()
+    fd.append('file', file)
+
+    let endpoint = '/upload/image?type=tenants'
+    if (file.type === 'application/pdf' || file.type.includes('wordprocessingml') || file.type.includes('document')) {
+      endpoint = '/upload/document?type=tenants'
+    }
+
+    try {
+      const res = await api.post(endpoint, fd)
+      if (res.data?.path) setter(res.data.path)
+    } catch (err: any) {
+      toast.addToast(err?.response?.data?.message || 'File upload failed (only JPEG/PNG/PDF allowed)', 'error')
+    }
+  }
+
+  async function openDetail(idOrTenant: number | string | Tenant) {
+    const isObj = typeof idOrTenant === 'object'
+    const id = isObj ? (idOrTenant as Tenant).id : idOrTenant
+    try {
+      // Always fetch full tenant details from the API so fields like
+      // TIN, VAT, lease and unit are populated even if the list item
+      // provided a lightweight object.
+      const d: any = await getTenant(id)
+      setDetailTenant(d)
+      // also fetch active lease for this tenant to display lease value dynamically
+      try {
+        const leaseList: any = await listLeases({ tenant_id: id, page: 1, per_page: 10 })
+        const leasesArr = Array.isArray(leaseList) ? leaseList : (leaseList?.data || leaseList || [])
+        // prefer ACTIVE or RENEWED lease
+        const active = leasesArr.find((x: any) => ['ACTIVE', 'active', 'RENEWED', 'renewed'].includes(String(x.status)))
+        if (active) {
+          setDetailTenant(prev => ({
+            ...(prev as any),
+            lease: active,
+            unit: active.unit || active.unit_id || undefined,
+            building: active.building || active.building_id || undefined,
+          }))
+        } else {
+          // Clear lease info if no active lease found
+          setDetailTenant(prev => ({
+            ...(prev as any),
+            lease: undefined,
+            unit: undefined,
+            building: undefined,
+          }))
+        }
+      } catch (err) {
+        // Clear lease info on error
+        setDetailTenant(prev => ({
+          ...(prev as any),
+          lease: undefined,
+          unit: undefined,
+          building: undefined,
+        }))
+      }
+      setActiveDetailTab('info')
+
+      // load related lists (best-effort)
+      try { const msgs = await getMessages(id); setMessages(Array.isArray(msgs) ? msgs : (msgs?.data || msgs || [])) } catch { setMessages([]) }
+      try {
+        setLedgerLoading(true)
+        const lRes = await financeApi.getTenantLedger(String(id))
+        setLedger(lRes)
+      } catch { setLedger([]) } finally { setLedgerLoading(false) }
+      try {
+        setDocsList([]) // Clear previous docs while loading
+        await handleListDocs(id)
+      } catch { setDocsList([]) }
+    } catch (e: any) {
+      console.error(e)
+      // Fallback: if a lightweight object was passed, display it
+      if (isObj) setDetailTenant(idOrTenant as Tenant)
+      toast.addToast('Failed to load tenant details (showing basic info)', 'info')
+    }
+  }
+
+  async function handleSendNotice() {
+    if (!noticeContent.trim() || !selectedTenantId) return
+    setSendingNotice(true)
+    try {
+      await sendMessage({ tenant_id: selectedTenantId, content: noticeContent })
+      toast.addToast('Notice sent successfully', 'success')
+      setShowNoticeModal(false)
+      setNoticeContent('')
+    } catch (err: any) {
+      toast.addToast(err?.response?.data?.message || 'Failed to send notice', 'error')
+    } finally {
+      setSendingNotice(false)
+    }
+  }
+
+  // document upload/verify removed from tenant modal
+
+  // --- Admin actions on the Tenants page (not in detail modal) ---
+  async function handleUploadForSelected(e: React.FormEvent) {
+    e.preventDefault()
+    if (!selectedTenantId) { toast.addToast('Select tenant first', 'error'); return }
+    if (!docFile) { toast.addToast('Select file', 'error'); return }
+    const fd = new FormData()
+    fd.append('tenant_id', String(selectedTenantId))
+    fd.append('type', String(docType || 'ID'))
+    fd.append('file', docFile)
+    try {
+      // Debug: list FormData entries to confirm payload
+      try {
+        for (const [k, v] of (fd as any).entries()) {
+          // file objects will appear as File; log name for clarity
+          if (v instanceof File) console.debug('FormData', k, v.name, v.type, v.size)
+          else console.debug('FormData', k, v)
+        }
+      } catch (err) { console.debug('Could not enumerate FormData entries', err) }
+      console.debug('upload document for tenant', selectedTenantId, 'file:', docFile.name)
+      const res = await createDocument(fd)
+      toast.addToast('Document uploaded', 'success')
+      // refresh list for selected tenant
+      try { await handleListDocs(selectedTenantId) } catch { /* ignore */ }
+      return res
+    } catch (e: any) {
+      console.error('Upload error', e)
+      const server = e?.response?.data
+      let msg = e?.message || 'Upload failed'
+      try {
+        if (server) {
+          if (Array.isArray(server?.message)) msg = server.message.join('; ')
+          else if (typeof server?.message === 'string') msg = server.message
+          else if (server?.message) msg = JSON.stringify(server.message)
+          else msg = JSON.stringify(server)
+        }
+      } catch { /* ignore */ }
+      toast.addToast(msg, 'error')
+    }
+  }
+
+  async function handleListDocs(tenantIdOverride?: string | number) {
+    try {
+      // If tenantId overridden, use it; else use selectedTenantId
+      const tenantId = tenantIdOverride || selectedTenantId
+      if (!tenantId) {
+        setDocsList([])
+        return
+      }
+
+      console.debug('Listing documents for tenant (tenant_id)', tenantId)
+      const params = { tenant_id: tenantId }
+      const res: any = await listDocuments(params)
+      const list = Array.isArray(res) ? res : (res?.data || res || [])
+      console.debug('Documents list response', list)
+      setDocsList(list || [])
+    } catch (e: any) { console.error(e); toast.addToast('Failed to list documents', 'error') }
+  }
+
+  async function handleGetMessages() {
+    if (!selectedTenantId) { toast.addToast('Select tenant first', 'error'); return }
+    try {
+      const res = await getMessages(selectedTenantId)
+      const list = Array.isArray(res) ? res : (res?.data || res || [])
+      setAdminMessages(list)
+    } catch (e: any) { console.error(e); toast.addToast('Failed to load messages', 'error') }
+  }
+
+  async function handleListAnnouncements() {
+    try {
+      const res = await listAnnouncements({})
+      const list = Array.isArray(res) ? res : (res?.data || res || [])
+      setAdminAnnouncements(list)
+    } catch (e: any) { console.error(e); toast.addToast('Failed to load announcements', 'error') }
+  }
+
+
+
+  // Verify a single document by id (used from the documents list)
+  async function handleVerifyDocument(id: string | number) {
+    try {
+      await verifyDocument(id, { verified: true })
+      toast.addToast('Document verified', 'success')
+      // refresh list to reflect verification state
+      try { await handleListDocs(selectedTenantId) } catch { /* ignore */ }
+    } catch (e: any) {
+      console.error('Verify failed', e)
+      const server = e?.response?.data
+      let msg = e?.message || 'Verify failed'
+      try {
+        if (server) {
+          if (Array.isArray(server?.message)) msg = server.message.join('; ')
+          else if (typeof server?.message === 'string') msg = server.message
+          else if (server?.message) msg = JSON.stringify(server.message)
+          else msg = JSON.stringify(server)
+        }
+      } catch { /* ignore */ }
+      toast.addToast(msg, 'error')
+    }
+  }
+
+  // Verify a tenant-stored image (profile/license/id) by creating a document record and auto-verifying it
+  async function handleVerifyTenantImage(type: string) {
+    if (!detailTenant || !detailTenant.id) { toast.addToast('Tenant not loaded', 'error'); return }
+    try {
+      await createAndVerifyFromTenant(detailTenant.id, { type })
+      toast.addToast('Document verified', 'success')
+      try { await openDetail(detailTenant.id) } catch { /* ignore */ }
+    } catch (e: any) {
+      console.error('Verify tenant image failed', e)
+      const server = e?.response?.data
+      let msg = e?.message || 'Verify failed'
+      try {
+        if (server) {
+          if (Array.isArray(server?.message)) msg = server.message.join('; ')
+          else if (typeof server?.message === 'string') msg = server.message
+          else if (server?.message) msg = JSON.stringify(server.message)
+          else msg = JSON.stringify(server)
+        }
+      } catch { /* ignore */ }
+      toast.addToast(msg, 'error')
+    }
+  }
+
+  async function handleListPendingApps() {
+    try {
+      const res = await listPendingApplications()
+      const list = Array.isArray(res) ? res : (res?.data || res || [])
+      setApplications(list)
+    } catch (e: any) { console.error(e); toast.addToast('Failed to load applications', 'error') }
+  }
+
+  async function handleCreateApplication(e: React.FormEvent) {
+    e.preventDefault()
+    if (!selectedTenantId) { toast.addToast('Select tenant first', 'error'); return }
+    if (appUnitId) {
+      const unit = units.find(u => String(u.id) === String(appUnitId))
+      const status = (unit?.status || '').toString().toLowerCase()
+      if (unit && !['vacant', 'available', 'free', 'empty', 'unoccupied', ''].includes(status)) {
+        toast.addToast('Selected unit is not vacant - choose another unit', 'error')
+        return
+      }
+    }
+    try {
+      const payload: any = { tenant_id: String(selectedTenantId) }
+      if (appUnitId) payload.unit_id = String(appUnitId)
+      if (appBuildingId) payload.building_id = appBuildingId
+      if (appMoveInDate) payload.move_in_date = appMoveInDate
+      if (appBody) payload.details = appBody
+      console.debug('create application payload', payload)
+      await createApplication(payload)
+      toast.addToast('Application created', 'success')
+      setAppBody('')
+      setAppUnitId('')
+      setAppBuildingId('')
+      setAppMoveInDate('')
+    } catch (e: any) {
+      console.error('Create application error', e)
+      const server = e?.response?.data
+      let msg = e?.message || 'Create application failed'
+      try {
+        if (server) {
+          if (Array.isArray(server?.message)) msg = server.message.join('; ')
+          else if (typeof server?.message === 'string') msg = server.message
+          else if (server?.message) msg = JSON.stringify(server.message)
+          else msg = JSON.stringify(server)
+        }
+      } catch { /* ignore */ }
+      toast.addToast(msg, 'error')
+    }
+  }
+
+  useEffect(() => {
+    // load units when a building is selected for application
+    async function loadUnits() {
+      if (!appBuildingId) { setUnits([]); return }
+      try {
+        const res: any = await listUnits({ building_id: appBuildingId, page: 1, per_page: 200 })
+        const list = Array.isArray(res) ? res : (res?.data || res || [])
+        setUnits(list)
+      } catch (err) { console.error(err); setUnits([]) }
+    }
+    loadUnits()
+  }, [appBuildingId])
+
+
+
+  async function handleCreateAnnouncement(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      const payload: any = {
+        title: announceTitle,
+        message: announceMessage,
+        target: announceTarget,
+      }
+      if (announceBuildingId) payload.building_id = announceBuildingId
+      if (announceSiteId) payload.site_id = announceSiteId
+      await createAnnouncement(payload)
+      toast.addToast('Announcement created', 'success')
+      setAnnounceTitle(''); setAnnounceMessage(''); setAnnounceTarget('all'); setAnnounceBuildingId(''); setAnnounceSiteId('')
+    } catch (e: any) { console.error(e); toast.addToast('Create announcement failed', 'error') }
+  }
+
+  async function handleSendMessage(e: React.FormEvent) {
+    e.preventDefault()
+    if (!selectedTenantId) { toast.addToast('Select tenant first', 'error'); return }
+    try {
+      // API expects { tenant_id, content }
+      const content = `${msgSubject ? msgSubject + "\n\n" : ''}${msgBody}`
+      await sendMessage({ tenant_id: selectedTenantId, content })
+      toast.addToast('Message sent', 'success')
+      setMsgSubject(''); setMsgBody('')
+    } catch (e: any) { console.error(e); toast.addToast('Send message failed', 'error') }
+  }
+
+  // compute lease value to display (try multiple possible fields)
+  const leaseAmountRaw = (
+    (detailTenant as any)?.lease?.monthly_amount ??
+    (detailTenant as any)?.lease?.rent_amount ??
+    (detailTenant as any)?.lease?.rent ??
+    (detailTenant as any)?.lease?.amount ??
+    (detailTenant as any)?.unit?.rent_price ??
+    (detailTenant as any)?.rent_price ??
+    (detailTenant as any)?.monthly_rent ??
+    null
+  )
+  const formattedLease = leaseAmountRaw ? `${new Intl.NumberFormat('en-ET', { style: 'currency', currency: 'ETB' }).format(Number(leaseAmountRaw))} / mo` : '—'
+
+  const leaseStats = useMemo(() => {
+    if (!detailTenant) return null;
+    const l = (detailTenant as any).lease || ((detailTenant as any).leases || []).find((x: any) => x.status?.toUpperCase() === 'ACTIVE' || x.status?.toUpperCase() === 'RENEWED') || ((detailTenant as any).leases || [])[0];
+    if (!l?.end_date) return null;
+
+    const end = new Date(l.end_date).getTime();
+    const diffDays = Math.ceil((end - Date.now()) / (1000 * 60 * 60 * 24));
+
+    let progress = 100;
+    if (l.start_date) {
+      const start = new Date(l.start_date).getTime();
+      const total = end - start;
+      const elapsed = Date.now() - start;
+      progress = total > 0 ? Math.min(100, Math.max(0, (elapsed / total) * 100)) : 100;
+    }
+
+    return { daysLeft: diffDays, progress };
+  }, [detailTenant]);
+
+  return (
+    <PageLayout
+      title="Tenant Management"
+      subtitle={`Curating ${tenants.length.toLocaleString()} active lease agreements across 14 properties.`}
+      actions={
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <PermissionGate permission="reports:view">
+            <button onClick={() => downloadReport('tenants')} className="button-secondary flex items-center gap-2 px-3 sm:px-6 py-2.5 rounded-xl shadow-sm transition-all active:scale-95 text-xs sm:text-sm whitespace-nowrap">
+              <Download size={18} /> <span className="hidden xs:inline">Export CSV</span>
+              <span className="xs:hidden">Export</span>
+            </button>
+          </PermissionGate>
+          <PermissionGate permission="users:create">
+            <button onClick={() => setShowRegister(true)} className="button flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-6 py-2.5 rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-95 text-xs sm:text-sm whitespace-nowrap">
+              <Plus size={18} /> <span className="hidden xs:inline">Register Tenant</span>
+              <span className="xs:hidden">Register</span>
+            </button>
+          </PermissionGate>
+        </div>
+      }
+    >
+      <div className="space-y-6">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+            <div className="w-12 h-12 border-4 border-slate-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+            <p className="font-medium animate-pulse">Curation in progress...</p>
+          </div>
+        ) : (
+          <div className={`grid grid-cols-1 ${selectedTenantId ? 'xl:grid-cols-12' : ''} gap-10 transition-all duration-500 items-start`}>
+
+            {/* Tenant List Section */}
+            <div className={`${selectedTenantId ? 'xl:col-span-8' : 'xl:col-span-12'}`}>
+
+              <div className="hidden lg:grid grid-cols-12 px-10 mb-6 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                <div className="col-span-5">Tenant Identity</div>
+                <div className="col-span-3">Building</div>
+                <div className="col-span-2 text-center ml-[-40px]">Lease Status</div>
+                <div className="col-span-2 text-right">Action</div>
+              </div>
+
+              <div className="space-y-4">
+                {tenants.map(t => {
+                  const isSelected = String(t.id) === String(selectedTenantId)
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedTenantId('')
+                        } else {
+                          setSelectedTenantId(t.id)
+                          openDetail(t)
+                        }
+                      }}
+                      className={`group flex flex-col sm:grid sm:grid-cols-12 items-start sm:items-center px-6 lg:px-10 py-5 sm:py-7 rounded-[24px] sm:rounded-[32px] border transition-all duration-300 cursor-pointer relative overflow-hidden ${isSelected
+                        ? 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-2xl shadow-slate-200 dark:shadow-none'
+                        : 'bg-white/60 dark:bg-slate-800/40 border-slate-100 dark:border-slate-700/50 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-200 shadow-sm hover:shadow-xl'
+                        }`}
+                    >
+                      {/* Selection Indigo Bar */}
+                      {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-indigo-600"></div>}
+
+                      {/* Identity */}
+                      <div className="col-span-12 sm:col-span-5 flex items-center gap-4 sm:gap-6 mb-4 sm:mb-0">
+                        <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-[18px] sm:rounded-[24px] overflow-hidden flex items-center justify-center shadow-sm shrink-0">
+                          <img
+                            src={`https://ui-avatars.com/api/?name=${t.first_name}+${t.last_name || ''}&background=f1f5f9&color=64748b&bold=true`}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-black text-slate-900 dark:text-white text-base sm:text-lg tracking-tight truncate">
+                            {t.first_name} {t.last_name || ''}
+                          </div>
+                          <div className="text-[11px] sm:text-xs font-bold text-slate-400 flex items-center gap-2 mt-1 lowercase truncate">
+                            <Mail size={12} className="shrink-0" /> {t.email}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Building */}
+                      <div className="col-span-6 sm:col-span-3 mb-2 sm:mb-0">
+                        <div className="text-[10px] sm:hidden font-black uppercase tracking-widest text-slate-400 mb-1">Building</div>
+                        <div className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300">{t.building?.name || t.building_name || t.building || (t.lease?.building?.name) || '—'}</div>
+                      </div>
+
+                      {/* Status */}
+                      <div className="col-span-6 sm:col-span-2 flex flex-col sm:items-center sm:justify-center sm:ml-[-40px]">
+                        <div className="text-[10px] sm:hidden font-black uppercase tracking-widest text-slate-400 mb-1">Status</div>
+                        <StatusBadge status={t.lease?.status || 'NO LEASE'} size="sm" />
+                      </div>
+
+                      {/* Actions */}
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 sm:static sm:translate-y-0 col-span-12 sm:col-span-2 flex items-center justify-end">
+                        <button className={`p-2 sm:p-3.5 rounded-xl sm:rounded-2xl transition-all ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600' : 'text-slate-400 hover:bg-slate-50 hover:text-indigo-600'}`}>
+                          {isSelected ? <Plus size={18} className="rotate-45" /> : <MoreHorizontal size={18} />}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Selection Sidebar (Pixel-Perfect Match & Spacious Fix) */}
+            {selectedTenantId && detailTenant && (
+              <div className="xl:col-span-4 animate-in slide-in-from-right duration-500">
+                <div className="sticky top-24 bg-white dark:bg-slate-800 rounded-[40px] border border-slate-100 dark:border-slate-700/60 p-8 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.08)]">
+
+                  {/* Sidebar Header Area */}
+                  <div className="relative mb-8">
+                    {leaseStats && (
+                      <div className={`absolute top-2 right-2 px-3 py-1 text-[9px] font-black uppercase tracking-[0.2em] rounded-full border z-10 ${leaseStats.daysLeft < 0 ? 'bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-900/50' : 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-900/50'}`}>
+                        {leaseStats.daysLeft < 0 ? `Expired ~${Math.abs(leaseStats.daysLeft)} Days` : `Due in ${leaseStats.daysLeft} Days`}
+                      </div>
+                    )}
+                    <div className="w-36 h-36 mx-auto rounded-[35px] overflow-hidden border-4 border-slate-50 dark:border-slate-900 shadow-lg">
+                      <img
+                        src={
+                          detailTenant.profile_image
+                            ? `${API_BASE}${detailTenant.profile_image}`
+                            : `https://ui-avatars.com/api/?name=${detailTenant.first_name}+${detailTenant.last_name || ''}&background=6366f1&color=fff&size=512&bold=true`
+                        }
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-center mb-8">
+                    <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">
+                      {detailTenant.first_name} {detailTenant.last_name}
+                    </h3>
+                    <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase tracking-widest flex items-center justify-center gap-2">
+                      <span>Individual</span>
+                      <span className="w-1 h-1 rounded-full bg-slate-200"></span>
+                      <span>Professional</span>
+                    </p>
+                  </div>
+
+                  {/* Property Identity Grid */}
+                  <div className="grid grid-cols-2 gap-3 mb-8">
+                    <div className="p-5 bg-slate-50 dark:bg-slate-900/50 rounded-[24px] border border-slate-100 dark:border-slate-800">
+                      <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 opacity-60">Building</div>
+                      <div className="text-xs font-black text-slate-800 dark:text-slate-200 truncate">{detailTenant?.building?.name || detailTenant?.building_name || detailTenant?.building || '—'}</div>
+                    </div>
+                    <div className="p-5 bg-slate-50 dark:bg-slate-900/50 rounded-[24px] border border-slate-100 dark:border-slate-800">
+                      <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 opacity-60">Unit</div>
+                      <div className="text-xs font-black text-slate-800 dark:text-slate-200 truncate">{detailTenant?.unit_number || detailTenant?.unit?.unit_number || detailTenant?.unit?.name || '—'}</div>
+                    </div>
+                  </div>
+
+                  {/* Contact Channels */}
+                  <div className="space-y-5 mb-8">
+                    <div className="flex items-center gap-4 group cursor-pointer">
+                      <div className="w-12 h-12 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 transition-all duration-300">
+                        <Mail size={18} strokeWidth={2.5} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Primary Email</div>
+                        <div className="text-xs font-black text-slate-900 dark:text-slate-200 truncate">{detailTenant.email}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 group cursor-pointer">
+                      <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 transition-all duration-300">
+                        <Phone size={18} strokeWidth={2.5} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Phone Number</div>
+                        <div className="text-xs font-black text-slate-900 dark:text-slate-200 truncate">{detailTenant.phone}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 group cursor-pointer">
+                      <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 transition-all duration-300">
+                        <CreditCard size={18} strokeWidth={2.5} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Lease Value</div>
+                        <div className="text-xs font-black text-slate-900 dark:text-slate-200 truncate">{formattedLease}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Row */}
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={() => setShowFullModal(true)}
+                      className="w-full py-4 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 font-black uppercase tracking-[0.2em] text-[10px] rounded-xl border border-slate-100 dark:border-slate-700 hover:bg-slate-100 transition-all"
+                    >
+                      View Full Profile
+                    </button>
+                    <button
+                      onClick={() => openEditTenant(detailTenant)}
+                      className="w-full py-4 bg-amber-500 text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-xl shadow-lg shadow-amber-100 dark:shadow-none hover:bg-amber-600 transition-all"
+                    >
+                      Edit Tenant
+                    </button>
+                    <button
+                      onClick={() => setShowNoticeModal(true)}
+                      className="w-full py-4 bg-indigo-600 text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-xl shadow-lg shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all"
+                    >
+                      Send Notice
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Register Tenant Modal */}
+        {showRegister && (
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-4 animate-in fade-in duration-300">
+            <div className="bg-white dark:bg-slate-800 rounded-[16px] p-6 w-full max-w-full md:max-w-xl shadow-[0_16px_32px_-8px_rgba(0,0,0,0.10)] border border-white dark:border-slate-700/50 max-h-[70vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Register New Tenant</h3>
+                  <p className="text-sm font-medium text-slate-500 mt-1">Initialize a new lease agreement profile.</p>
+                </div>
+                <button onClick={() => setShowRegister(false)} className="p-3 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-all">
+                  <ArrowRight className="rotate-45 text-slate-400" size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleRegister} className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">First Name <span className="text-red-500">*</span></label>
+                    <input required placeholder="Helena" value={firstName} onChange={e => setFirstName(e.target.value)} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Last Name <span className="text-red-500">*</span></label>
+                    <input required placeholder="Thorne" value={lastName} onChange={e => setLastName(e.target.value)} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none" />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Email Address <span className="text-red-500">*</span></label>
+                  <input required type="email" placeholder="helena.thorne@example.com" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none" />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1.5">
+                    <MessageCircle size={12} className="text-cyan-500" /> Telegram Username
+                  </label>
+                  <input placeholder="@tenant_username" value={telegramUsername} onChange={e => setTelegramUsername(e.target.value)} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-cyan-500/10 transition-all outline-none" />
+                  <p className="text-[10px] text-slate-400 ml-1">Optional. BMS will email a secure Telegram connect link after registration.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Phone Number <span className="text-red-500">*</span></label>
+                    <input required placeholder="+1 234 567 890" value={phone} onChange={e => setPhone(e.target.value)} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Tenant Type</label>
+                    <select value={tenantType} onChange={e => setTenantType(e.target.value)} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none appearance-none cursor-pointer">
+                      <option value="personal">Individual Tenant</option>
+                      <option value="organizational">Corporate Entity</option>
+                    </select>
+                  </div>
+                </div>
+
+
+
+                 <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Password <span className="text-red-500">*</span></label>
+                  <input required type="password" minLength={6} placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-5 py-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none" />
+                  <p className="text-[10px] text-slate-400 ml-1">Minimum 6 characters. Alphanumeric allowed, special characters optional.</p>
+                </div>
+
+                {/* Conditional Fields based on Tenant Type */}
+                <div className="p-6 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border border-slate-100 dark:border-slate-800 space-y-4">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <Shield size={12} className="text-indigo-500" /> Professional Documentation
+                  </h4>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">ID / Passport</label>
+                      <div onClick={() => idImageRef.current?.click()} className="w-full h-12 bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center cursor-pointer hover:border-indigo-400 transition-all overflow-hidden">
+                        <input type="file" accept="image/*" ref={idImageRef} onChange={e => handleImageUpload(e, setIdImage)} className="hidden" />
+                        {idImage ? (<img src={`${API_BASE}${idImage}`} className="h-full w-full object-cover rounded-xl" />) : (<Plus size={18} className="text-slate-300" />)}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">License</label>
+                      <div onClick={() => licenseImageRef.current?.click()} className="w-full h-12 bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center cursor-pointer overflow-hidden">
+                        <input type="file" accept="image/*" ref={licenseImageRef} onChange={e => handleImageUpload(e, setLicenseImage)} className="hidden" />
+                        {licenseImage ? (<img src={`${API_BASE}${licenseImage}`} className="h-full w-full object-cover rounded-xl" />) : (<Plus size={16} className="text-slate-300" />)}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Profile</label>
+                      <div onClick={() => profileImageRef.current?.click()} className="w-full h-12 bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center cursor-pointer overflow-hidden">
+                        <input type="file" accept="image/*" ref={profileImageRef} onChange={e => handleImageUpload(e, setProfileImage)} className="hidden" />
+                        {profileImage ? (<img src={`${API_BASE}${profileImage}`} className="h-full w-full object-cover rounded-xl" />) : (<Plus size={16} className="text-slate-300" />)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mt-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">TIN Number <span className="text-slate-300 normal-case">(10 digits)</span></label>
+                      <input
+                        placeholder="e.g. 0000011037"
+                        value={tinNumber}
+                        onChange={e => {
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 10)
+                          setTinNumber(val)
+                          if (val && val.length !== 10) setTinError('TIN must be exactly 10 digits')
+                          else setTinError('')
+                        }}
+                        maxLength={10}
+                        inputMode="numeric"
+                        pattern="[0-9]{10}"
+                        className={`w-full h-12 px-4 bg-white dark:bg-slate-800 border rounded-xl text-xs font-bold outline-none ${tinError ? 'border-rose-400 focus:ring-rose-500/20' : 'border-slate-200 dark:border-slate-700'}`}
+                      />
+                      {tinError && <p className="text-[10px] font-bold text-rose-500 ml-1">{tinError}</p>}
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">VAT Number</label>
+                      <input placeholder="VAT Reg #" value={vatRegNumber} onChange={e => setVatRegNumber(e.target.value)} className="w-full h-12 px-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 mt-4">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">TIN Certificate</label>
+                    <div onClick={() => tinCertImageRef.current?.click()} className="w-full h-12 bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center cursor-pointer hover:border-indigo-400 transition-all overflow-hidden">
+                      <input type="file" accept="image/*,.pdf" ref={tinCertImageRef} onChange={e => handleImageUpload(e, setTinCertImage)} className="hidden" />
+                      {tinCertImage ? (
+                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-600"><FileText size={14} /> TIN Certificate Uploaded</div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-xs text-slate-300"><Plus size={16} /> Upload TIN Certificate</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 mt-4">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Detailed Address</label>
+                    <input placeholder="Suite / House #" value={detailedAddress} onChange={e => setDetailedAddress(e.target.value)} className="w-full h-12 px-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none" />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-6 border-t border-slate-100 dark:border-slate-700/50">
+                  <button type="button" onClick={() => setShowRegister(false)} className="px-8 py-3.5 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 transition-all">Cancel</button>
+                  <button type="submit" className="px-8 py-3.5 bg-indigo-600 text-white font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all">Initialize Tenant</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Full Profile Detail Modal */}
+        {showFullModal && detailTenant && (
+          <div className="fixed inset-0 flex items-center justify-center z-[60] p-4 animate-in zoom-in duration-500">
+            <div className="bg-white dark:bg-slate-800 rounded-[50px] w-full max-w-5xl shadow-[0_50px_100px_-20px_rgba(0,0,0,0.25)] border border-white/20 dark:border-slate-700/50 overflow-hidden flex flex-col max-h-[92vh]">
+
+              {/* Profile Header Block */}
+              <div className="relative h-64 bg-indigo-600 dark:bg-indigo-950 overflow-hidden shrink-0">
+                <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(99,102,241,0.9),rgba(79,70,229,0.95))]"></div>
+                <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '24px 24px' }}></div>
+
+                <div className="absolute bottom-0 left-0 right-0 p-10 flex items-end justify-between">
+                  <div className="flex items-end gap-8">
+                    <div
+                      className="w-32 h-32 rounded-[40px] bg-white p-2 shadow-2xl border-4 border-white/20 -mb-12 cursor-pointer transition-all hover:scale-105 active:scale-95"
+                      onClick={() => {
+                        const url = detailTenant.profile_image
+                          ? `${API_BASE}${detailTenant.profile_image}`
+                          : `https://ui-avatars.com/api/?name=${detailTenant.first_name}+${detailTenant.last_name || ''}&background=f1f5f9&color=4f46e5&size=512&bold=true`
+                        window.open(url, '_blank')
+                      }}
+                    >
+                      <img
+                        src={
+                          detailTenant.profile_image
+                            ? `${API_BASE}${detailTenant.profile_image}`
+                            : `https://ui-avatars.com/api/?name=${detailTenant.first_name}+${detailTenant.last_name || ''}&background=f1f5f9&color=4f46e5&size=512&bold=true`
+                        }
+                        className="w-full h-full object-cover rounded-[32px]"
+                      />
+                    </div>
+                    <div className="pb-2">
+                      <h2 className="text-4xl font-black text-white tracking-tight">{detailTenant.first_name} {detailTenant.last_name}</h2>
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <span className="px-3 py-1 bg-white/20 backdrop-blur-md rounded-lg text-[10px] font-black text-white uppercase tracking-widest border border-white/10">ID: {detailTenant.id}</span>
+                        <span className="px-3 py-1 bg-emerald-400/20 backdrop-blur-md rounded-lg text-[10px] font-black text-emerald-300 uppercase tracking-widest border border-emerald-400/20">Active Lease</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowFullModal(false)} className="mb-2 p-4 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white rounded-[24px] border border-white/10 transition-all">
+                    <Plus className="rotate-45" size={24} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Tabs Navigation */}
+              <div className="px-10 mt-20 flex gap-8 border-b border-slate-100 dark:border-slate-800 shrink-0">
+                {[
+                  { id: 'info', icon: Info, label: 'Overview' },
+                  { id: 'ledger', icon: CreditCard, label: 'Financial Ledger' },
+                  { id: 'messages', icon: MessageCircle, label: 'Communication' },
+                  { id: 'documents', icon: FileText, label: 'Documents' }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveDetailTab(tab.id as any)}
+                    className={`pb-4 text-sm font-bold flex items-center gap-2 transition-all relative ${activeDetailTab === tab.id ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                  >
+                    <tab.icon size={16} />
+                    {tab.label}
+                    {activeDetailTab === tab.id && <div className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-600 rounded-full"></div>}
+                  </button>
+                ))}
+              </div>
+
+              {/* Scrollable Content Area */}
+              <div className="flex-1 overflow-y-auto p-10 custom-scrollbar">
+                {activeDetailTab === 'info' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in slide-in-from-bottom-5 duration-500">
+                    <div className="lg:col-span-2 space-y-10">
+                      <div>
+                        <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[.25em] mb-6 flex items-center gap-3">
+                          <UserPlus size={14} className="text-indigo-500" /> Administrative Identity
+                        </h3>
+                        <div className="grid grid-cols-2 gap-x-12 gap-y-8">
+                          {[
+                            { label: 'Primary Contact', value: detailTenant.phone },
+                            { label: 'Official Email', value: detailTenant.email },
+                            { label: 'Tenant Classification', value: detailTenant.tenant_type === 'personal' ? 'Individual / Residential' : 'Corporate / Commercial' },
+                            { label: 'Tax Identification (TIN)', value: detailTenant.tin_number || 'Not Provided' },
+                            { label: 'Registration Date', value: detailTenant.created_at ? new Date(detailTenant.created_at).toLocaleDateString() : 'Legacy Entry' },
+                            { label: 'VAT Registration', value: detailTenant.vat_reg_number || 'N/A' }
+                          ].map((item, idx) => (
+                            <div key={idx} className="group">
+                              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 group-hover:text-indigo-500 transition-colors">{item.label}</div>
+                              <div className="text-sm font-black text-slate-700 dark:text-slate-200">{item.value || '—'}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="pt-4">
+                        <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[.25em] mb-6 flex items-center gap-3">
+                          <MapPin size={14} className="text-emerald-500" /> Assigned Location
+                        </h3>
+                        <div className="p-8 bg-slate-50 dark:bg-slate-900/50 rounded-[35px] border border-slate-100 dark:border-slate-800 flex items-center justify-between group hover:border-indigo-100 transition-all">
+                          <div className="flex items-center gap-6">
+                            <div className="w-16 h-16 rounded-[24px] bg-white dark:bg-slate-800 shadow-xl flex items-center justify-center border border-slate-100 dark:border-slate-700">
+                              <Building2 size={24} className="text-slate-400 group-hover:text-indigo-600 transition-colors" />
+                            </div>
+                            <div>
+                              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Primary Residence</div>
+                              <div className="text-lg font-black text-slate-800 dark:text-slate-200">{(detailTenant?.building?.name || detailTenant?.building_name || detailTenant?.building || '—')}{(detailTenant?.unit_number || detailTenant?.unit?.unit_number || detailTenant?.unit?.name) ? ' • ' + (detailTenant?.unit_number || detailTenant?.unit?.unit_number || detailTenant?.unit?.name) : ''}</div>
+                              <div className="text-xs font-medium text-slate-400 mt-0.5">{detailTenant?.lease?.building?.city || detailTenant?.building?.city || ''}{detailTenant?.lease?.building?.subcity ? ` • ${detailTenant.lease.building.subcity}` : (detailTenant?.building?.subcity ? ` • ${detailTenant.building.subcity}` : '')}</div>
+                            </div>
+                          </div>
+                          <button className="p-4 bg-white dark:bg-slate-800 text-slate-400 hover:text-indigo-600 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm transition-all hover:scale-110 active:scale-95">
+                            <ArrowRight size={20} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="lg:col-span-1 space-y-8">
+                      <div className="p-8 bg-indigo-50/50 dark:bg-indigo-900/20 rounded-[40px] border border-indigo-100 dark:border-indigo-900/30">
+                        <div className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center justify-between">
+                          <span>Operational Status</span>
+                          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                        </div>
+                        <div className="space-y-6">
+                          <div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-[.15em] mb-1">Lease Renewal</div>
+                            <div className="text-lg font-black text-slate-800 dark:text-slate-200">
+                              {leaseStats ? (leaseStats.daysLeft < 0 ? `Expired ${Math.abs(leaseStats.daysLeft)} Days Ago` : `${leaseStats.daysLeft} Days Remaining`) : 'No Active Lease'}
+                            </div>
+                            <div className="mt-2 w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full ${leaseStats?.daysLeft && leaseStats.daysLeft < 0 ? 'bg-gradient-to-r from-rose-500 to-rose-600' : 'bg-gradient-to-r from-indigo-500 to-indigo-600'}`} style={{ width: `${leaseStats?.progress || 100}%` }}></div>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-[.15em] mb-1">Portfolio Value</div>
+                            <div className="text-lg font-black text-indigo-600">{formattedLease}</div>
+                            <div className="text-[10px] font-medium text-slate-400">Total lifetime value assigned</div>
+                          </div>
+                        </div>
+                      </div>
+
+
+                    </div>
+                  </div>
+                )}
+
+                {activeDetailTab === 'ledger' && (
+                  <div className="animate-in fade-in slide-in-from-bottom-5 duration-500 space-y-8">
+                    <div className="flex items-center justify-between p-8 bg-slate-50 dark:bg-slate-900/50 rounded-[40px] border border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-6">
+                        <div className="w-16 h-16 rounded-[24px] bg-indigo-600 shadow-xl shadow-indigo-200 flex items-center justify-center text-white">
+                          <CreditCard size={28} />
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Outstanding Balance</div>
+                          <div className={`text-4xl font-black ${(ledger[ledger.length - 1]?.balance || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            ETB {Number(ledger[ledger.length - 1]?.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      </div>
+                      <a
+                        href={financeApi.getTenantLedgerPdfUrl(String(detailTenant.id))}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-8 py-4 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-black uppercase tracking-[0.2em] text-[11px] rounded-[24px] border border-slate-200 dark:border-slate-700 shadow-sm hover:bg-slate-50 transition-all flex items-center gap-3"
+                      >
+                        <FileText size={16} className="text-indigo-600" /> Download PDF Statement
+                      </a>
+                    </div>
+
+                    {ledgerLoading ? (
+                      <div className="py-20 flex flex-col items-center justify-center text-slate-400 italic">
+                        <div className="w-8 h-8 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin mb-4"></div>
+                        <span className="text-xs font-bold uppercase tracking-widest">Auditing Accounts...</span>
+                      </div>
+                    ) : ledger.length === 0 ? (
+                      <div className="py-20 text-center text-slate-400 italic font-medium">No financial history found for this profile.</div>
+                    ) : (
+                      <div className="rounded-[35px] border border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
+                        <table className="w-full text-left">
+                          <thead className="bg-slate-50 dark:bg-slate-900/80 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
+                            <tr>
+                              <th className="px-8 py-5">Date</th>
+                              <th className="px-8 py-5">Descriptor</th>
+                              <th className="px-8 py-5 text-right">Debit</th>
+                              <th className="px-8 py-5 text-right">Credit</th>
+                              <th className="px-8 py-5 text-right bg-indigo-50/30 dark:bg-indigo-900/10">Running Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {ledger.map((entry, idx) => (
+                              <tr key={idx} className="group hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
+                                <td className="px-8 py-5 text-xs font-bold text-slate-500 uppercase">{entry.date}</td>
+                                <td className="px-8 py-5">
+                                  <div className="text-sm font-black text-slate-800 dark:text-slate-200">{entry.description}</div>
+                                  <div className="text-[10px] font-bold text-slate-400 tracking-wider">REF: {entry.reference}</div>
+                                </td>
+                                <td className="px-8 py-5 text-right text-sm font-black text-rose-600">{entry.debit > 0 ? entry.debit.toFixed(2) : '—'}</td>
+                                <td className="px-8 py-5 text-right text-sm font-black text-emerald-600">{entry.credit > 0 ? entry.credit.toFixed(2) : '—'}</td>
+                                <td className="px-8 py-5 text-right text-sm font-black text-slate-900 dark:text-white bg-indigo-50/10 dark:bg-indigo-900/5">{entry.balance.toFixed(2)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeDetailTab === 'messages' && (
+                  <div className="animate-in fade-in slide-in-from-bottom-5 duration-500 space-y-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
+                        <MessageCircle size={24} className="text-indigo-600" /> Communication Log
+                      </h3>
+                      <button onClick={() => setShowNoticeModal(true)} className="px-6 py-2.5 bg-indigo-600 text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all">
+                        New Message
+                      </button>
+                    </div>
+
+                    {messages.length === 0 ? (
+                      <div className="py-20 text-center text-slate-400 italic border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-[40px]">
+                        No active communication history found.
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {messages.map(m => (
+                          <div key={m.id} className="p-8 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[35px] hover:shadow-xl hover:shadow-indigo-500/5 transition-all group">
+                            <div className="flex items-start justify-between mb-4">
+                              <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 shadow-sm flex items-center justify-center text-indigo-500">
+                                  <Mail size={18} />
+                                </div>
+                                <div>
+                                  <h5 className="font-black text-slate-900 dark:text-slate-200 text-sm tracking-tight">{m.sender?.name || 'Manager'}</h5>
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{m.sender?.id === detailTenant?.user?.id ? 'Inbound Message' : 'Outbound Notice'}</p>
+                                </div>
+                              </div>
+                              <div className="text-[11px] font-bold text-slate-400">
+                                {m.sent_at ? new Date(m.sent_at).toLocaleDateString() + ' ' + new Date(m.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                              </div>
+                            </div>
+                            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed pl-14 whitespace-pre-wrap">
+                              {m.content}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeDetailTab === 'documents' && (
+                  <div className="animate-in fade-in slide-in-from-bottom-5 duration-500 space-y-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
+                        <FileText size={24} className="text-indigo-600" /> Documents
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => openDetail(detailTenant?.id)} className="button-secondary">Refresh</button>
+                      </div>
+                    </div>
+
+                    {/* If there are no document records, also show tenant image fields saved on the tenant record */}
+                    {(() => {
+                      const extraDocs: any[] = [];
+                      if (detailTenant?.profile_image) {
+                        extraDocs.push({ id: 'tenant-profile', type: 'Profile Image', file_url: detailTenant.profile_image, verified: detailTenant.profile_image_verified ?? false });
+                      }
+                      if (detailTenant?.license_image) {
+                        extraDocs.push({ id: 'tenant-license', type: 'License / Work Permit', file_url: detailTenant.license_image, verified: detailTenant.license_image_verified ?? false });
+                      }
+                      if (detailTenant?.id_image) {
+                        extraDocs.push({ id: 'tenant-id', type: 'ID / Passport', file_url: detailTenant.id_image, verified: detailTenant.id_image_verified ?? false });
+                      }
+
+                      const displayDocs = [
+                        ...extraDocs.filter(ex => !docsList.some(dl => dl.file_url === ex.file_url && dl.verified)),
+                        ...docsList
+                      ];
+
+                      if (displayDocs.length === 0) {
+                        return (
+                          <div className="py-20 text-center text-slate-400 italic border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-[40px]">
+                            No documents uploaded for this tenant.
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-4">
+                          {displayDocs.map((doc: any) => (
+                            <div key={doc.id} className="p-6 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[24px] flex items-center justify-between">
+                              <div>
+                                <div className="text-sm font-black text-slate-800 dark:text-white">{doc.type || 'Document'}</div>
+                                <div className="text-xs text-slate-500 mt-1 truncate max-w-xl">{doc.file_url || doc.fileUrl || 'No file'}</div>
+                                <div className="text-[10px] text-slate-400 mt-1">{doc.verified ? 'Verified' : 'Not verified'}{doc.reject_reason ? ` — ${doc.reject_reason}` : ''}</div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                {doc.file_url && (
+                                  <a href={doc.file_url.startsWith('/') ? `${API_BASE}${doc.file_url}` : doc.file_url} target="_blank" rel="noreferrer" className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-100 rounded-xl font-bold text-slate-700 hover:bg-slate-50 transition-all cursor-pointer">View</a>
+                                )}
+                                {!doc.verified && (
+                                  <button
+                                    onClick={() => {
+                                      if (typeof doc.id === 'string' && String(doc.id).startsWith('tenant-')) {
+                                        const typeRaw = doc.id.replace('tenant-', '');
+                                        const typeMap: Record<string, string> = {
+                                          'id': 'ID',
+                                          'license': 'CONTRACT',
+                                          'profile': 'PROFILE'
+                                        };
+                                        handleVerifyTenantImage(typeMap[typeRaw] || typeRaw.toUpperCase());
+                                      } else {
+                                        handleVerifyDocument(doc.id);
+                                      }
+                                    }}
+                                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold transition-all active:scale-95"
+                                  >
+                                    Verify
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Send Notice Modal */}
+        {showNoticeModal && (
+          <div className="fixed inset-0 flex items-center justify-center z-[70] p-6 pointer-events-none animate-in fade-in duration-500">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[40px] shadow-2xl overflow-hidden border border-white/20 dark:border-slate-800 animate-in zoom-in-95 duration-500 pointer-events-auto">
+
+              {/* Header with Background Accent */}
+              <div className="relative p-10 bg-indigo-600 dark:bg-indigo-950 overflow-hidden">
+                <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(99,102,241,0.9),rgba(79,70,229,0.95))]"></div>
+                <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '16px 16px' }}></div>
+
+                <div className="relative flex items-center justify-between">
+                  <div>
+                    <h3 className="text-2xl font-black text-white tracking-tight">Issue Official Notice</h3>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="px-2 py-0.5 bg-white/20 rounded-md text-[9px] font-black text-white uppercase tracking-widest border border-white/10">Recipient</span>
+                      <p className="text-xs font-bold text-indigo-100">{detailTenant?.first_name} {detailTenant?.last_name}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowNoticeModal(false)}
+                    className="p-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl border border-white/10 transition-all active:scale-90"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-10 space-y-8">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 block">Message Payload</label>
+                  <textarea
+                    rows={6}
+                    value={noticeContent}
+                    onChange={(e) => setNoticeContent(e.target.value)}
+                    placeholder="Describe the nature of this notice..."
+                    className="w-full p-8 bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-[32px] focus:ring-8 focus:ring-indigo-500/5 focus:border-indigo-500/50 transition-all text-sm font-bold text-slate-700 dark:text-slate-200 placeholder:text-slate-300 resize-none outline-none"
+                  ></textarea>
+                </div>
+
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setShowNoticeModal(false)}
+                    className="flex-1 py-5 bg-slate-50 dark:bg-slate-950 text-slate-400 dark:text-slate-500 font-black uppercase tracking-[0.2em] text-[10px] rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-900 transition-all border border-slate-100 dark:border-slate-800"
+                  >
+                    Discard
+                  </button>
+                  <button
+                    onClick={handleSendNotice}
+                    disabled={sendingNotice || !noticeContent.trim()}
+                    className="flex-[2] py-5 bg-indigo-600 text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-2xl shadow-[0_20px_40px_-10px_rgba(79,70,229,0.3)] dark:shadow-none hover:bg-indigo-700 disabled:opacity-40 disabled:grayscale transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
+                  >
+                    {sendingNotice ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        <span>Processing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <MessageCircle size={18} className="text-indigo-200" />
+                        <span>Send Notice</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Edit Tenant Modal */}
+      {showEditTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-800 rounded-[2rem] w-full max-w-xl overflow-hidden shadow-2xl border border-white/20 dark:border-slate-700/50 p-8 max-h-[85vh] overflow-y-auto">
+            <div className="mb-6 flex items-start justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white">Edit Tenant</h3>
+                <p className="text-sm font-medium text-slate-500 mt-1">Update tenant profile and documentation.</p>
+              </div>
+              <button onClick={() => setShowEditTenant(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors">
+                <X size={18} className="text-slate-400" />
+              </button>
+            </div>
+            <form onSubmit={handleEditTenant} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">First Name <span className="text-red-500">*</span></label>
+                  <input value={editFirstName} onChange={e => setEditFirstName(e.target.value)} className="w-full h-12 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none" required />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Last Name <span className="text-red-500">*</span></label>
+                  <input value={editLastName} onChange={e => setEditLastName(e.target.value)} className="w-full h-12 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none" required />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email <span className="text-red-500">*</span></label>
+                  <input type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} className="w-full h-12 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none" required />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Phone <span className="text-red-500">*</span></label>
+                  <input value={editPhone} onChange={e => setEditPhone(e.target.value)} className="w-full h-12 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none" required />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tenant Type</label>
+                  <select value={editTenantType} onChange={e => setEditTenantType(e.target.value)} className="w-full h-12 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none appearance-none cursor-pointer">
+                    <option value="personal">Individual Tenant</option>
+                    <option value="organizational">Corporate Entity</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Status</label>
+                  <select value={editTenantStatus} onChange={e => setEditTenantStatus(e.target.value)} className="w-full h-12 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none">
+                    <option value="active">Active</option>
+                    <option value="blacklisted">Blacklisted</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Professional Documentation Section */}
+              <div className="p-5 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-4">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <Shield size={12} className="text-indigo-500" /> Professional Documentation
+                </h4>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">TIN Number <span className="text-slate-300 normal-case">(10 digits)</span></label>
+                    <input value={editTinNumber} onChange={e => setEditTinNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} maxLength={10} inputMode="numeric" className="w-full h-12 px-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">VAT Number</label>
+                    <input value={editVatRegNumber} onChange={e => setEditVatRegNumber(e.target.value)} className="w-full h-12 px-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none" />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Detailed Address</label>
+                  <input value={editDetailedAddress} onChange={e => setEditDetailedAddress(e.target.value)} placeholder="Suite / House #" className="w-full h-12 px-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none" />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">ID / Passport</label>
+                    <div onClick={() => editIdImageRef.current?.click()} className="w-full h-12 bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center cursor-pointer hover:border-indigo-400 transition-all overflow-hidden">
+                      <input type="file" accept="image/*,.pdf" ref={editIdImageRef} onChange={e => handleImageUpload(e, setEditIdImage)} className="hidden" />
+                      {editIdImage ? (<div className="flex items-center gap-2 text-xs font-bold text-emerald-600"><FileText size={14} /> ✓ Uploaded</div>) : (<Plus size={18} className="text-slate-300" />)}
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">License</label>
+                    <div onClick={() => editLicenseImageRef.current?.click()} className="w-full h-12 bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center cursor-pointer hover:border-indigo-400 transition-all overflow-hidden">
+                      <input type="file" accept="image/*,.pdf" ref={editLicenseImageRef} onChange={e => handleImageUpload(e, setEditLicenseImage)} className="hidden" />
+                      {editLicenseImage ? (<div className="flex items-center gap-2 text-xs font-bold text-emerald-600"><FileText size={14} /> ✓ Uploaded</div>) : (<Plus size={16} className="text-slate-300" />)}
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Profile</label>
+                    <div onClick={() => editProfileImageRef.current?.click()} className="w-full h-12 bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center cursor-pointer hover:border-indigo-400 transition-all overflow-hidden">
+                      <input type="file" accept="image/*" ref={editProfileImageRef} onChange={e => handleImageUpload(e, setEditProfileImage)} className="hidden" />
+                      {editProfileImage ? (<div className="flex items-center gap-2 text-xs font-bold text-emerald-600"><FileText size={14} /> ✓ Uploaded</div>) : (<Plus size={16} className="text-slate-300" />)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">TIN Certificate</label>
+                  <div onClick={() => editTinCertImageRef.current?.click()} className="w-full h-12 bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center cursor-pointer hover:border-indigo-400 transition-all overflow-hidden">
+                    <input type="file" accept="image/*,.pdf" ref={editTinCertImageRef} onChange={e => handleImageUpload(e, setEditTinCertImage)} className="hidden" />
+                    {editTinCertImage ? (<div className="flex items-center gap-2 text-xs font-bold text-emerald-600"><FileText size={14} /> TIN Certificate Uploaded</div>) : (<div className="flex items-center gap-2 text-xs text-slate-300"><Plus size={16} /> Upload TIN Certificate</div>)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
+                <button type="button" onClick={() => setShowEditTenant(false)} className="px-6 py-3 text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-all">Cancel</button>
+                <button type="submit" className="px-6 py-3 bg-indigo-600 text-white text-sm font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-all">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </PageLayout>
+  )
+}

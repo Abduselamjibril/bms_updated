@@ -1,0 +1,422 @@
+import React, { useEffect, useState, useMemo } from 'react'
+import PageLayout from '../components/PageLayout'
+import { getProfile, changePassword } from '../auth/auth'
+import { useToast } from '../components/ToastProvider'
+import * as telegramApi from '../api/telegram'
+import { Lock, Key, Eye, EyeOff, Send, MessageCircle, Unlink, Mail } from 'lucide-react'
+
+export default function Profile() {
+  const toast = useToast()
+  const [profile, setProfile] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Password change state
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [telegramStatus, setTelegramStatus] = useState<any>(null)
+  const [telegramUsername, setTelegramUsername] = useState('')
+  const [telegramBusy, setTelegramBusy] = useState(false)
+  const [telegramConnectUrl, setTelegramConnectUrl] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+    getProfile()
+      .then((p) => { if (mounted) setProfile(p) })
+      .catch((e: any) => {
+        if (mounted) setError(e?.response?.data?.message || 'Failed to load profile')
+      })
+    return () => { mounted = false }
+  }, [])
+
+  useEffect(() => {
+    loadTelegramStatus()
+  }, [])
+
+  async function loadTelegramStatus() {
+    try {
+      const status = await telegramApi.getMyTelegramStatus()
+      setTelegramStatus(status)
+      setTelegramUsername(status?.telegram_username || '')
+    } catch (e) {
+      console.error('Failed to load Telegram status', e)
+    }
+  }
+
+  async function handleCreateTelegramLink() {
+    setTelegramBusy(true)
+    try {
+      const res = await telegramApi.createMyTelegramConnectLink(telegramUsername)
+      setTelegramConnectUrl(res.url)
+      toast.addToast('Telegram connect link generated', 'success')
+      loadTelegramStatus()
+    } catch (e: any) {
+      toast.addToast(e?.response?.data?.message || 'Failed to generate Telegram link', 'error')
+    } finally {
+      setTelegramBusy(false)
+    }
+  }
+
+  async function handleResendTelegramEmail() {
+    setTelegramBusy(true)
+    try {
+      await telegramApi.resendMyTelegramConnectEmail(telegramUsername)
+      toast.addToast('Telegram connect email sent', 'success')
+      loadTelegramStatus()
+    } catch (e: any) {
+      toast.addToast(e?.response?.data?.message || 'Failed to send Telegram email', 'error')
+    } finally {
+      setTelegramBusy(false)
+    }
+  }
+
+  async function handleDisconnectTelegram() {
+    setTelegramBusy(true)
+    try {
+      await telegramApi.disconnectMyTelegram()
+      setTelegramConnectUrl('')
+      toast.addToast('Telegram disconnected', 'success')
+      loadTelegramStatus()
+    } catch (e: any) {
+      toast.addToast(e?.response?.data?.message || 'Failed to disconnect Telegram', 'error')
+    } finally {
+      setTelegramBusy(false)
+    }
+  }
+
+  const displayName = profile?.name || profile?.fullName || profile?.username || profile?.email?.split('@')[0] || 'User'
+  const initials = displayName.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2)
+  const roles: string[] = Array.isArray(profile?.roles) ? profile.roles : (profile?.roles ? [profile.roles] : [])
+  const isTenant = roles.includes('tenant')
+  const minLength = isTenant ? 6 : 8
+  const permissions: string[] = Array.isArray(profile?.permissions) ? profile.permissions : []
+
+  // Group permissions by module
+  const groupedPermissions = useMemo(() => {
+    const groups: Record<string, string[]> = {}
+    permissions.forEach(p => {
+      const parts = p.split(':')
+      const module = parts.length > 1 ? parts[0] : 'general'
+      const action = parts.length > 1 ? parts.slice(1).join(':') : p
+      if (!groups[module]) groups[module] = []
+      groups[module].push(action)
+    })
+    return groups
+  }, [permissions])
+
+  const moduleColors: Record<string, string> = {
+    users: 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-500/20',
+    buildings: 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-500/20',
+    units: 'bg-violet-50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-200 dark:border-violet-500/20',
+    tenants: 'bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-500/20',
+    leases: 'bg-fuchsia-50 dark:bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-400 border-fuchsia-200 dark:border-fuchsia-500/20',
+    finance: 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20',
+    maintenance: 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20',
+    visitors: 'bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-200 dark:border-cyan-500/20',
+    roles: 'bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-500/20',
+    permissions: 'bg-pink-50 dark:bg-pink-500/10 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-500/20',
+    sites: 'bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-200 dark:border-teal-500/20',
+    owners: 'bg-lime-50 dark:bg-lime-500/10 text-lime-700 dark:text-lime-400 border-lime-200 dark:border-lime-500/20',
+    documents: 'bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-500/20',
+    amenities: 'bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-500/20',
+    qr: 'bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700/60',
+    utilities: 'bg-yellow-50 dark:bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-200 dark:border-yellow-500/20',
+    reports: 'bg-green-50 dark:bg-green-500/10 text-green-700 dark:text-green-400 border-green-200 dark:border-green-500/20',
+    settings: 'bg-gray-50 dark:bg-slate-900/50 text-gray-700 dark:text-slate-300 border-gray-200 dark:border-slate-700/60',
+    applications: 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-500/20',
+    announcements: 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20',
+    messages: 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-500/20',
+  }
+
+  if (error) {
+    return (
+      <PageLayout title="Profile" subtitle="Your account details">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-red-200 p-8 text-center">
+          <div className="text-red-500 text-4xl mb-3">⚠️</div>
+          <div className="text-red-600 font-medium">{error}</div>
+        </div>
+      </PageLayout>
+    )
+  }
+
+  if (!profile) {
+    return (
+      <PageLayout title="Profile" subtitle="Your account details">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/60 p-12 text-center">
+          <div className="animate-pulse flex flex-col items-center gap-4">
+            <div className="w-20 h-20 bg-slate-200 rounded-full" />
+            <div className="h-4 bg-slate-200 rounded w-40" />
+            <div className="h-3 bg-slate-100 rounded w-56" />
+          </div>
+        </div>
+      </PageLayout>
+    )
+  }
+
+  return (
+    <PageLayout title="Profile" subtitle="Your account details and permissions">
+      <div className="max-w-5xl mx-auto space-y-6">
+
+        {/* ── Profile Header Card ── */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/60 overflow-hidden">
+          <div className="h-24 sm:h-32 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
+          <div className="px-6 sm:px-8 pb-6 sm:pb-8 -mt-10 sm:-mt-14">
+            <div className="flex flex-col sm:flex-row items-center sm:items-end gap-4 sm:gap-6 text-center sm:text-left">
+              <div className="w-20 h-20 sm:w-28 sm:h-28 rounded-2xl bg-white dark:bg-slate-800 shadow-lg border-4 border-white dark:border-slate-800 flex items-center justify-center text-2xl sm:text-3xl font-bold text-indigo-600 bg-gradient-to-br from-indigo-50 to-purple-50 flex-shrink-0">
+                {initials}
+              </div>
+              <div className="sm:pt-16 pb-1 flex-1">
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">{displayName}</h2>
+                <p className="text-sm text-slate-500 mt-0.5">{profile.email}</p>
+              </div>
+            </div>
+
+            {/* Role Badges */}
+            <div className="mt-5 flex flex-wrap justify-center sm:justify-start gap-2">
+              {roles.map((role: string) => (
+                <span key={role} className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-1 sm:py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-indigo-100 text-indigo-700 border border-indigo-200">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+                  {role.replace(/_/g, ' ')}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Account Details Card ── */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/60 p-8">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-5 flex items-center gap-2">
+            <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+            Account Details
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-y-5 gap-x-12">
+            {[
+              { label: 'Email', value: profile.email },
+              { label: 'Name', value: displayName },
+              { label: 'Roles', value: roles.join(', ') || '—' },
+              { label: 'Created', value: profile.created_at ? new Date(profile.created_at).toLocaleDateString() : '—' },
+              { label: 'Last Login', value: profile.last_login_at ? new Date(profile.last_login_at).toLocaleString() : '—' },
+            ].map(({ label, value }) => (
+              <div key={label} className="flex items-start gap-3">
+                <span className="text-sm font-medium text-slate-400 w-24 flex-shrink-0">{label}</span>
+                <span className="text-sm text-slate-800 dark:text-slate-200 font-medium break-all">{value || '—'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Telegram Connection */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/60 p-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-cyan-500" />
+              Telegram Notifications
+            </h3>
+            <span className={`text-xs font-bold px-3 py-1 rounded-full ${telegramStatus?.connected ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
+              {telegramStatus?.connected ? 'Connected' : 'Not connected'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-end">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Telegram Username</label>
+              <input
+                value={telegramUsername}
+                onChange={e => setTelegramUsername(e.target.value)}
+                placeholder="@your_username"
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-cyan-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-2">
+                Username is optional for display. Private delivery starts after you open the secure bot link.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={handleCreateTelegramLink} disabled={telegramBusy} className="px-4 py-2.5 rounded-xl bg-cyan-600 text-white text-xs font-bold flex items-center gap-2 disabled:opacity-50">
+                <Send size={14} /> Generate Link
+              </button>
+              <button type="button" onClick={handleResendTelegramEmail} disabled={telegramBusy} className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-2 disabled:opacity-50">
+                <Mail size={14} /> Email Link
+              </button>
+              {telegramStatus?.connected && (
+                <button type="button" onClick={handleDisconnectTelegram} disabled={telegramBusy} className="px-4 py-2.5 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold flex items-center gap-2 disabled:opacity-50">
+                  <Unlink size={14} /> Disconnect
+                </button>
+              )}
+            </div>
+          </div>
+
+          {telegramConnectUrl && (
+            <div className="mt-5 p-4 bg-cyan-50 border border-cyan-100 rounded-xl">
+              <p className="text-xs font-bold text-cyan-800 uppercase tracking-widest mb-2">Connect Link</p>
+              <a href={telegramConnectUrl} target="_blank" rel="noreferrer" className="text-sm font-bold text-cyan-700 break-all hover:underline">
+                {telegramConnectUrl}
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* ── Permissions Card ── */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/60 p-8">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+              <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+              Permissions
+            </h3>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 px-2.5 py-1 rounded-full shadow-sm">
+              {permissions.length} total
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Object.entries(groupedPermissions).map(([module, actions]) => (
+              <div key={module} className={`rounded-xl border p-4 ${moduleColors[module] || 'bg-slate-50 dark:bg-slate-900 text-slate-700 border-slate-200 dark:border-slate-700'}`}>
+                <div className="font-semibold text-sm capitalize mb-2 flex items-center justify-between">
+                  {module.replace(/_/g, ' ')}
+                  <span className="text-xs opacity-60 font-normal">{actions.length}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {actions.map(action => (
+                    <span key={action} className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tight bg-white dark:bg-slate-800/60 border border-current/20 shadow-sm transition-transform hover:scale-105">
+                      {action}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Security / Change Password Section ── */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/60 p-8">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-5 flex items-center gap-2">
+            <Key className="w-5 h-5 text-slate-400" />
+            Security
+          </h3>
+
+          {isChangingPassword ? (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (newPassword.length < minLength) {
+                  return toast.addToast(`New password must be at least ${minLength} characters long`, 'error')
+                }
+                if (newPassword !== confirmPassword) {
+                  return toast.addToast('New passwords do not match', 'error')
+                }
+                setIsSubmitting(true)
+                try {
+                  await changePassword({ currentPassword, newPassword })
+                  toast.addToast('Password updated successfully', 'success')
+                  setIsChangingPassword(false)
+                  setCurrentPassword(''); setNewPassword(''); setConfirmPassword('')
+                } catch (err: any) {
+                  toast.addToast(err?.response?.data?.message || 'Failed to update password', 'error')
+                } finally {
+                  setIsSubmitting(false)
+                }
+              }}
+              className="max-w-md space-y-4"
+            >
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Current Password</label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPassword ? 'text' : 'password'}
+                    required
+                    value={currentPassword}
+                    onChange={e => setCurrentPassword(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
+                  >
+                    {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">New Password</label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    required
+                    minLength={minLength}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
+                  >
+                    {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {isTenant 
+                    ? 'Minimum 6 characters. Alphanumeric allowed, special characters optional.' 
+                    : 'Minimum 8 characters.'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Confirm New Password</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
+                  >
+                    {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-xl shadow-lg transition-all disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Updating...' : 'Update Password'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsChangingPassword(false)}
+                  className="text-slate-500 font-bold hover:bg-slate-100 py-2 px-6 rounded-xl transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">Regularly updating your password helps keep your account secure.</p>
+              <button
+                onClick={() => setIsChangingPassword(true)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 px-6 rounded-xl transition-all flex items-center gap-2"
+              >
+                <Lock size={16} /> Change Password
+              </button>
+            </div>
+          )}
+        </div>
+
+      </div>
+    </PageLayout>
+  )
+}

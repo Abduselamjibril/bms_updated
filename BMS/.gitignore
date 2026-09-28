@@ -1,0 +1,24 @@
+node_modules/
+dist/
+.env
+uploads/
+coverage/
+package-lock.json
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+
+# Docker
+*.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Build
+build/
+src/config/firebase-service-account.json
+

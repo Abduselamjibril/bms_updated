@@ -1,0 +1,114 @@
+import { SitesModule } from './modules/sites/sites.module';
+import { UploadModule } from './modules/upload/upload.module';
+import { SettingsModule } from './modules/settings/settings.module';
+import { Module } from '@nestjs/common';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule } from '@nestjs/config'; // <-- 1. Import ConfigModule
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { RolesGuard } from './common/guards/roles.guard';
+import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+import { RolesModule } from './modules/roles/roles.module';
+import { OwnersModule } from './modules/owners/owners.module';
+import { BuildingsModule } from './modules/buildings/buildings.module';
+import { UnitsModule } from './modules/units/units.module';
+import { UnitTypesModule } from './modules/unit-types/unit-types.module';
+
+import { AmenitiesModule } from './modules/amenities/amenities.module';
+import { AuditModule } from './modules/audit/audit.module';
+import { TenantsModule } from './modules/tenants/tenants.module';
+import { LeasesModule } from './modules/leases/leases.module';
+import { FinanceModule } from './modules/finance/finance.module';
+import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { DocumentModule } from './modules/documents/document.module';
+import { QrModule } from './modules/qr/qr.module';
+import { VisitorsModule } from './modules/visitors/visitors.module';
+import { UtilityModule } from './modules/utility/utility.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { AutomationsModule } from './modules/automations/automations.module';
+import { TypeOrmModule as FeatureTypeOrmModule } from '@nestjs/typeorm';
+import { UserRole } from './modules/roles/entities/user-role.entity';
+import { ReportsModule } from './modules/reports/reports.module';
+import { InspectionsModule } from './modules/inspections/inspections.module';
+import { AssetsModule } from './modules/assets/assets.module';
+import { ManagementModule } from './modules/management/management.module';
+import { CommissionModule } from './modules/commission/commission.module';
+import { TendersModule } from './modules/tenders/tenders.module';
+import { WorkforceModule } from './modules/workforce/workforce.module';
+
+@Module({
+  imports: [
+    ServeStaticModule.forRoot({
+      rootPath: join(process.cwd(), 'uploads'),
+      serveRoot: '/uploads',
+    }),
+    // 2. Add this line BEFORE TypeOrmModule
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
+    TypeOrmModule.forRoot({
+      type: 'postgres',
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT ?? '5432', 10),
+      username: process.env.DB_USERNAME || 'postgres',
+      password: process.env.DB_PASSWORD || 'postgres',
+      database: process.env.DB_NAME || 'bms_db',
+      autoLoadEntities: true,
+      synchronize: true,
+    }),
+    AuthModule,
+    UsersModule,
+    RolesModule,
+    OwnersModule,
+    BuildingsModule,
+    UnitsModule,
+    UnitTypesModule,
+    AmenitiesModule,
+    AuditModule,
+    SitesModule,
+    UploadModule,
+    SettingsModule,
+    TenantsModule,
+    LeasesModule,
+    FinanceModule,
+    MaintenanceModule,
+    // Visitors module (Phase 6)
+    VisitorsModule,
+    // Utility meters & readings (Phase 6)
+    UtilityModule,
+    DocumentModule,
+    // QR Module (Phase 5)
+    QrModule,
+    FeatureTypeOrmModule.forFeature([UserRole]),
+    NotificationsModule,
+    // Reports module (Phase 5)
+    ReportsModule,
+    // Automations module (Phase: Scheduled Cron Jobs)
+    AutomationsModule,
+    InspectionsModule,
+    AssetsModule,
+    ManagementModule,
+    CommissionModule,
+    TendersModule,
+    WorkforceModule,
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 100, // 100 requests per minute
+    }]),
+  ],
+  controllers: [AppController],
+  providers: [
+    AppService, 
+    RolesGuard,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
+})
+export class AppModule {}

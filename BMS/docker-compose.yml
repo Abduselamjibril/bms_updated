@@ -1,0 +1,80 @@
+services:
+  # Main NestJS API
+  api:
+    image: bms/bms-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bms_api
+    ports:
+      - "127.0.0.1:${PORT}:${PORT}"
+    env_file:
+      - .env
+    volumes:
+      - ./uploads:/usr/src/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: always
+    networks:
+      - bms-net
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 512M
+
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: bms_db
+    ports:
+      - "127.0.0.1:${DB_PORT_EXTERNAL}:5432"
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - bms_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_NAME}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bms-net
+
+  # Database Management Tool
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: bms_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT}:80"
+    depends_on:
+      - db
+    networks:
+      - bms-net
+
+  # Redis for Caching/Queues
+  redis:
+    image: redis:7-alpine
+    container_name: bms_redis
+    ports:
+      - "127.0.0.1:${REDIS_PORT_EXTERNAL}:6379"
+    networks:
+      - bms-net
+  # Firebase Emulator for Local Development
+
+networks:
+  bms-net:
+    driver: bridge
+
+volumes:
+  bms_pgdata:

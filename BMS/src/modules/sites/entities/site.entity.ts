@@ -1,0 +1,53 @@
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { Building } from '../../buildings/entities/building.entity';
+import { User } from '../../users/entities/user.entity';
+
+@Entity('sites')
+@Index('idx_site_city', ['city'])
+export class Site {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ length: 100 })
+  name!: string;
+
+  @Column({ length: 50 })
+  city!: string;
+
+  @Column({ length: 50 })
+  subcity!: string;
+
+  @Column({ length: 100 })
+  location!: string;
+
+  @Column({ length: 50, nullable: true })
+  code?: string;
+
+  @Column({ length: 255, nullable: true })
+  address?: string;
+
+  @Column({ length: 50, nullable: true })
+  timezone?: string;
+
+  @Column({ length: 10, nullable: true })
+  currency?: string;
+
+  @Column({ length: 100, nullable: true })
+  contact_email?: string;
+
+  @Column({ type: 'text', nullable: true })
+  notes?: string;
+
+  @Column({ length: 255, nullable: true })
+  image_url?: string;
+
+  @OneToMany(() => Building, (building) => building.site)
+  buildings!: Building[];
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'manager_id' })
+  manager?: User;
+
+  @Column({ nullable: true })
+  manager_id?: string;
+}
